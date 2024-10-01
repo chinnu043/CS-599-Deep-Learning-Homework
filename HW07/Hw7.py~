@@ -1,0 +1,103 @@
+import torch
+import pandas as pd
+import matplotlib
+import numpy as np
+matplotlib.use("agg")
+
+from sklearn.model_selection import KFold, GridSearchCV, ParameterGrid
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegressionCV
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score
+from collections import Counter
+
+
+data_set_dict = {"zip": ("zip.test.gz", 0),
+                 "spam": ("spam.data", 57)}
+data_dict = {}
+
+for data_name, (file_name, label_col_num) in data_set_dict.items():
+    data_df = pd.read_csv(file_name, sep=" ", header=None)
+    data_label_vec = data_df.iloc[:, label_col_num]
+    is_01 = data_label_vec.isin([0, 1])
+    data_01_df = data_df.loc[is_01, :]
+    is_label_col = data_df.columns == label_col_num
+    data_features = data_01_df.iloc[:, ~is_label_col]
+    data_labels = data_01_df.iloc[:, is_label_col]
+    data_dict[data_name] = (data_features, data_labels)
+
+spam_features, spam_labels = data_dict.pop("spam")
+spam_nrow, spam_ncol = spam_features.shape
+spam_mean = spam_features.mean().to_numpy().reshape(1, spam_ncol)
+spam_std = spam_features.std().to_numpy().reshape(1, spam_ncol)
+spam_scaled = (spam_features - spam_mean)/spam_std
+data_dict["spam_scaled"] = (spam_scaled, spam_labels)
+{data_name:X.shape for data_name, (X,y) in data_dict.items()}
+
+data_features, data_labels = data_dict["zip"]
+data_nrow, data_ncol = data_features.shape
+
+input_mat = data_features.to_numpy()
+output_vec = np.where(data_labels.to_numpy() == 1, 1, -1)
+weight_vec = np.repeat(0.0, data_ncol).reshape(data_ncol, 1)
+
+class Node:
+    def __repr__(self):
+        return "Node%s"%str(self.value.shape)
+
+class InitialNode(Node):
+    def __init__(self, value):
+        self.value = value
+
+input_node = InitialNode(input_mat)
+output_node = InitialNode(output_vec)
+weight_node = InitialNode(weight_vec)
+
+class Operation(Node):
+    def backward(self):
+        gradients = self.gradient()
+        for parent_node, grad in zip(self.parents, gradients):
+            parent_node.grad = grad
+            parent_node.backward()
+
+class mm(Operation):
+    def __init__(self, feature_node, weight_node):
+        self.parents = [feature_node, weight_node]
+        self.value = np.matmul(feature_node.value, weight_node.value)
+    def gradient(self):
+        feature_node, weight_node = self.parents
+        return[
+            np.matmul(self.grad, weight_node.value.T),
+            np.matmul(feature_node.value.T, self.grad)]
+
+pred_node = mm(input_node, weight_node)
+
+class logistic_loss(Operation):
+    def __init__(self, pred_node, output_node):
+        self.parents = [pred_node, output_node]
+        output_vec = output_node.value
+        if not ((output_vec == 1) | (output_vec == -1)).all():
+            raise ValueError("Labels should be only -1 or 1")
+        self.value = np.log(1 + np.exp(-output_vec * pred_node.value))
+
+    def gradient(self):
+        pred_node, output_node = self.parents
+        # features X is b x p
+        # weights W is p x u = 1
+        # pred A is b x u = 1
+        # where b is batch size
+        # p is number of input features
+        # u is number of outputs
+        # grad_A(b x u) W(u x p)
+        pred_grad = -output_node.value/(
+            1 + np.exp(
+                output_node.value*
+                pred_node.value
+                )
+            )
+            
+        return [pred_grad, None]
+
+loss_node = logistic_loss(pred_node, output_node)
+grad_vec = Operation()

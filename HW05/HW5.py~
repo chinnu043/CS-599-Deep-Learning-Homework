@@ -1,0 +1,113 @@
+import pandas as pd
+from sklearn.model_selection import KFold, GridSearchCV, ParameterGrid
+
+import matplotlib
+import numpy as np
+matplotlib.use("agg")
+
+
+data_set_dict = {"zip": ("zip.test.gz", 0),
+                 "spam": ("spam.data", 57)}
+data_dict = {}
+
+for data_name, (file_name, label_col_num) in data_set_dict.items():
+    data_df = pd.read_csv(file_name, sep=" ", header=None)
+    data_label_vec = data_df.iloc[:, label_col_num]
+    is_01 = data_label_vec.isin([0, 1])
+    data_01_df = data_df.loc[is_01, :]
+    is_label_col = data_df.columns == label_col_num
+    data_features = data_01_df.iloc[:, ~is_label_col]
+    data_labels = data_01_df.iloc[:, is_label_col]
+    #data_dict[data_name] = (data_features, data_labels)
+    # scaling the data
+    n_data_features = data_features.shape[1]
+    data_mean = data_features.mean().to_numpy().reshape(1, n_data_features)
+    data_std = data_features.std().to_numpy().reshape(1, n_data_features)
+    data_scaled = (data_features - data_mean) / data_std
+    data_name_scaled = data_name + "_scaled"
+    data_scaled = data_scaled.dropna(axis="columns")
+    data_dict[data_name_scaled] = (data_scaled, data_labels)
+    #print(data_scaled)
+    # data_scaled = data_name_scaled.dropna(axis = "columns")
+    # data_dict[data_name_scaled] = data_name_scaled
+
+
+#scaling spam dataset only
+spam_features, spam_labels = data_dict.pop("spam")
+n_spam_rows, n_spam_features = spam_features.shape
+spam_mean = spam_features.mean().to_numpy().reshape(1, n_spam_features)
+spam_std = spam_features.std().to_numpy().reshape(1, n_spam_features)
+spam_scaled = (spam_features - spam_mean)/spam_std
+data_dict["spam_scaled"] = (spam_scaled, spam_labels)
+
+#Gradient Descent
+{data_name: X.shape for data_name, (X,y) in data_dict.items()}
+for data_name, (data_features, data_labels) in data_dict.items():
+    #pass
+    data_nrow, data_ncol = data_features.shape
+    weight_vec = np.repeat(0.0, data_ncol).reshape(data_ncol, 1)
+    for i in range(10):  
+        data_mat = data_features.to_numpy()
+        pred_vec = np.matmul(data_mat, weight_vec).reshape(data_nrow, 1)
+        pred = np.where(pred_vec >= 0, 1, 0)
+        accuracy = np.mean(pred == data_labels)
+        print("Accuracy = ", accuracy)
+        label_pos_neg_vec = np.where(data_labels == 1,1,-1)
+        grad_loss_wrt_pred = -label_pos_neg_vec/(1 + np.exp(label_pos_neg_vec * pred_vec))
+        loss_vec = np.log(1 + np.exp(-label_pos_neg_vec * pred_vec))
+        #print(loss_vec)
+        grad_loss_wrt_weight = np.matmul(data_mat.T, grad_loss_wrt_pred)
+        step_size = 0.001
+        weight_vec -= step_size * grad_loss_wrt_weight 
+        #print(loss_vec.mean())
+        new_pred_vec = np.matmul(data_mat, weight_vec).reshape(data_nrow, 1)
+        new_pred = np.where(new_pred_vec >= 0, 1, 0)
+        acc = np.mean(new_pred == data_labels)
+        print("New Accuracy = ", acc.mean())
+        print("**********")
+    print(f"***** end of {data_name} *****")
+    
+
+
+    
+class MyLogReg:
+
+    def __init__(self, max_iterations, step_size):
+        self.max_iterations = max_iterations
+        self.step_size = step_size
+
+    def fit(self, X,y):
+        data_nrow, data_ncol = X.shape
+        self.weight_vec = np.repeat(0.0, data_ncol).reshape(data_ncol, 1)
+        for i in range(self.max_iterations):  
+            data_mat = X.to_numpy()
+            pred_vec = np.matmul(data_mat, self.weight_vec).reshape(data_nrow, 1)
+            label_pos_neg_vec = np.where(y == 1,1,-1)
+            grad_loss_wrt_pred = -label_pos_neg_vec/(1 + np.exp(label_pos_neg_vec * pred_vec))
+            loss_vec = np.log(1 + np.exp(-label_pos_neg_vec * pred_vec))
+            print(loss_vec.mean())
+            grad_loss_wrt_weight = np.matmul(data_mat.T, grad_loss_wrt_pred)
+            #step_size = 0.001
+            self.weight_vec -= self.step_size * grad_loss_wrt_weight 
+        #print(f"***** end of {data_name} *****")
+
+    def decision_function(self, X):
+
+        return np.matmul(data_mat, self.weight_vec).reshape(X.shape[0], 1)
+
+    def predict(self, X):
+
+        scores = self.decision_function(X)
+        return np.where(scores > 0, 1, 0)
+        
+
+    
+
+
+class MyLogRegCV:
+
+    def __init__(self):
+
+
+    def fit(self, X, y):
+        
